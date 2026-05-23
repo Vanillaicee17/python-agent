@@ -28,44 +28,78 @@ messages: list[types.Content] = [
     types.Content(role="user", parts=[types.Part(text=args.user_prompt)])
 ]
 
-response = client.models.generate_content(
-    model = MODEL_NAME,
-    contents=messages,
-    config = types.GenerateContentConfig(
-        tools = [available_functions],
-        system_instruction=system_prompt
+for _ in range(20):
+
+    response = client.models.generate_content(
+        model = MODEL_NAME,
+        contents=messages,
+        config = types.GenerateContentConfig(
+            tools = [available_functions],
+            system_instruction=system_prompt
+        )
+
     )
 
-)
+    if response.candidates:
+        for candidate in response.candidates:
+            if candidate.content is None:
+                print("Warning: candidate content was None")
+                continue
+            messages.append(candidate.content)
 
 
-if response.usage_metadata is None:
-    raise RuntimeError
+    if response.usage_metadata is None:
+        raise RuntimeError
 
-if args.verbose:
-    print("User prompt: ", args.user_prompt)
-    print("Prompt tokens: ", response.usage_metadata.prompt_token_count)
-    print("Response tokens: ", response.usage_metadata.candidates_token_count)
-
-
+    if args.verbose:
+        print("User prompt: ", args.user_prompt)
+        print("Prompt tokens: ", response.usage_metadata.prompt_token_count)
+        print("Response tokens: ", response.usage_metadata.candidates_token_count)
 
 
-if response.function_calls:
-    for function_call in response.function_calls:
-        function_call_res = call_function(function_call=function_call)
+    function_responses = []
 
-        if function_call_res.parts is None:
-            raise Exception
+    if response.function_calls:
+        for function_call in response.function_calls:
+            function_call_res = call_function(function_call=function_call)
+
+            if function_call_res.parts is None:
+                raise Exception
+            
+            elif function_call_res.parts[0].function_response is None:
+                raise Exception
+            
+            elif function_call_res.parts[0].function_response.response is None:
+                raise Exception
         
-        elif function_call_res.parts[0].function_response is None:
-            raise Exception
+            if function_call.name is None:
+                raise Exception("Missing function name")
+
+            if args.verbose:
+                print(f"-> {function_call_res.parts[0].function_response.response}")
+
+            result = types.Part.from_function_response(
+                name = function_call.name,
+                response= {"result": function_call_res.parts[0].function_response.response}
+            )
+
+            function_responses.append(result)
+            # function_responses.append(
+            #     function_call_res.parts[0]
+            # )
         
-        elif function_call_res.parts[0].function_response.response is None:
-            raise Exception
+        messages.append(
+            types.Content(
+                role="user",
+                parts=function_responses
+            )
+        )
+            
+
+    else:
+        print(response.text)
+        break
     
 
-        if args.verbose:
-            print(f"-> {function_call_res.parts[0].function_response.response}")
-
 else:
-    print(response.text)
+    print("Agent hit maximum iterations")
